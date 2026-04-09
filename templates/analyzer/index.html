@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Application Assistant</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0f0f0f; color: #e8e8e8; font-family: sans-serif; min-height: 100vh; }
+    .header { padding: 2rem; border-bottom: 1px solid #222; text-align: center; }
+    .header h1 { font-size: 1.6rem; font-weight: 500; color: #fff; }
+    .header p { color: #888; font-size: 14px; margin-top: 6px; }
+    .tabs { display: flex; justify-content: center; gap: 0; border-bottom: 1px solid #222; }
+    .tab { padding: 14px 32px; cursor: pointer; font-size: 14px; color: #888; border-bottom: 2px solid transparent; transition: all .2s; background: none; border-top: none; border-left: none; border-right: none; }
+    .tab.active { color: #c8a96e; border-bottom-color: #c8a96e; }
+    .tab:hover { color: #e8e8e8; }
+    .container { max-width: 800px; margin: 0 auto; padding: 2rem 1rem; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .form-group { margin-bottom: 1.5rem; }
+    label { display: block; font-size: 13px; color: #888; margin-bottom: 8px; }
+    textarea { width: 100%; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: #e8e8e8; padding: 12px; font-size: 14px; resize: vertical; outline: none; font-family: sans-serif; }
+    textarea:focus { border-color: #c8a96e; }
+    .file-drop { width: 100%; background: #1a1a1a; border: 1px dashed #333; border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; transition: border-color .2s; }
+    .file-drop:hover { border-color: #c8a96e; }
+    .file-drop input { display: none; }
+    .file-drop p { color: #666; font-size: 14px; }
+    .file-drop.has-file p { color: #c8a96e; }
+    .btn { width: 100%; padding: 14px; background: #c8a96e; color: #0f0f0f; border: none; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; transition: background .2s; }
+    .btn:hover { background: #d4b87a; }
+    .btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+    .results { margin-top: 2rem; display: none; }
+    .results.show { display: block; }
+    .score-card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+    .score-card h3 { font-size: 13px; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+    .score-number { font-size: 3rem; font-weight: 500; color: #c8a96e; }
+    .score-label { font-size: 13px; color: #666; margin-top: 4px; }
+    .result-section { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+    .result-section h3 { font-size: 13px; color: #888; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+    .result-section p { font-size: 14px; line-height: 1.7; color: #ccc; white-space: pre-wrap; }
+    .badge-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; background: #2a2a2a; border: 1px solid #444; color: #ccc; }
+    .badge.missing { border-color: #c0392b; color: #e74c3c; background: #1a0a0a; }
+    .loading { text-align: center; padding: 3rem; color: #666; display: none; }
+    .loading.show { display: block; }
+    .spinner { width: 32px; height: 32px; border: 2px solid #333; border-top-color: #c8a96e; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1rem; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .fit-card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; }
+    .fit-card .role { font-size: 15px; font-weight: 500; }
+    .fit-card .match { font-size: 1.4rem; font-weight: 500; }
+    .fit-card.high .match { color: #27ae60; }
+    .fit-card.medium .match { color: #c8a96e; }
+    .fit-card.low .match { color: #888; }
+    .fit-card .notes { font-size: 13px; color: #666; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Job Application Assistant</h1>
+    <p>AI-powered resume analysis and job matching</p>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('match')">Job Match Analyzer</button>
+    <button class="tab" onclick="switchTab('fit')">Career Fit Finder</button>
+  </div>
+
+  <div class="container">
+
+    <!-- TAB 1: Job Match Analyzer -->
+    <div class="panel active" id="panel-match">
+      <div class="form-group">
+        <label>Paste the job description</label>
+        <textarea id="job-desc" rows="8" placeholder="Paste the full job description here..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Upload your resume (PDF)</label>
+        <div class="file-drop" id="drop-match" onclick="document.getElementById('resume-match').click()">
+          <input type="file" id="resume-match" accept=".pdf" onchange="handleFile(this, 'drop-match', 'match-filename')">
+          <p id="match-filename">Click to upload your resume PDF</p>
+        </div>
+      </div>
+      <button class="btn" id="btn-match" onclick="runMatch()">Analyze Match</button>
+      <div class="loading" id="loading-match">
+        <div class="spinner"></div>
+        <p>Analyzing your resume against the job description...</p>
+      </div>
+      <div class="results" id="results-match"></div>
+    </div>
+
+    <!-- TAB 2: Career Fit Finder -->
+    <div class="panel" id="panel-fit">
+      <div class="form-group">
+        <label>Upload your resume (PDF)</label>
+        <div class="file-drop" id="drop-fit" onclick="document.getElementById('resume-fit').click()">
+          <input type="file" id="resume-fit" accept=".pdf" onchange="handleFile(this, 'drop-fit', 'fit-filename')">
+          <p id="fit-filename">Click to upload your resume PDF</p>
+        </div>
+      </div>
+      <button class="btn" id="btn-fit" onclick="runFit()">Find My Best Roles</button>
+      <div class="loading" id="loading-fit">
+        <div class="spinner"></div>
+        <p>Analyzing your resume to find your best career matches...</p>
+      </div>
+      <div class="results" id="results-fit"></div>
+    </div>
+
+  </div>
+
+  <script>
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('panel-' + tab).classList.add('active');
+    }
+
+    function handleFile(input, dropId, labelId) {
+      if (input.files[0]) {
+        document.getElementById(dropId).classList.add('has-file');
+        document.getElementById(labelId).textContent = input.files[0].name;
+      }
+    }
+
+    async function runMatch() {
+      const jobDesc = document.getElementById('job-desc').value.trim();
+      const resume = document.getElementById('resume-match').files[0];
+      if (!jobDesc || !resume) { alert('Please provide both a job description and your resume.'); return; }
+      const btn = document.getElementById('btn-match');
+      btn.disabled = true;
+      document.getElementById('loading-match').classList.add('show');
+      document.getElementById('results-match').classList.remove('show');
+      const formData = new FormData();
+      formData.append('job_description', jobDesc);
+      formData.append('resume', resume);
+      try {
+        const res = await fetch('/analyze/', { method: 'POST', body: formData });
+        const data = await res.json();
+        renderMatchResults(data);
+      } catch(e) {
+        alert('Something went wrong. Please try again.');
+      }
+      btn.disabled = false;
+      document.getElementById('loading-match').classList.remove('show');
+    }
+
+    async function runFit() {
+      const resume = document.getElementById('resume-fit').files[0];
+      if (!resume) { alert('Please upload your resume PDF.'); return; }
+      const btn = document.getElementById('btn-fit');
+      btn.disabled = true;
+      document.getElementById('loading-fit').classList.add('show');
+      document.getElementById('results-fit').classList.remove('show');
+      const formData = new FormData();
+      formData.append('resume', resume);
+      try {
+        const res = await fetch('/fit/', { method: 'POST', body: formData });
+        const data = await res.json();
+        renderFitResults(data);
+      } catch(e) {
+        alert('Something went wrong. Please try again.');
+      }
+      btn.disabled = false;
+      document.getElementById('loading-fit').classList.remove('show');
+    }
+
+    function renderMatchResults(data) {
+      const el = document.getElementById('results-match');
+      const scoreColor = data.score >= 70 ? '#27ae60' : data.score >= 45 ? '#c8a96e' : '#e74c3c';
+      const missingBadges = (data.missing_skills || []).map(s => `<span class="badge missing">${s}</span>`).join('');
+      const presentBadges = (data.present_skills || []).map(s => `<span class="badge">${s}</span>`).join('');
+      el.innerHTML = `
+        <div class="score-card">
+          <h3>Match Score</h3>
+          <div class="score-number" style="color:${scoreColor}">${data.score}%</div>
+          <div class="score-label">${data.score >= 70 ? 'Strong match — apply with confidence' : data.score >= 45 ? 'Moderate match — worth applying' : 'Weak match — focus on skill gaps first'}</div>
+        </div>
+        <div class="result-section">
+          <h3>Skills you have</h3>
+          <div class="badge-list">${presentBadges || '<span class="badge">None detected</span>'}</div>
+        </div>
+        <div class="result-section">
+          <h3>Missing skills</h3>
+          <div class="badge-list">${missingBadges || '<span class="badge">None — great match!</span>'}</div>
+        </div>
+        <div class="result-section">
+          <h3>Cover letter</h3>
+          <p>${data.cover_letter || 'No cover letter generated.'}</p>
+        </div>`;
+      el.classList.add('show');
+    }
+
+    function renderFitResults(data) {
+      const el = document.getElementById('results-fit');
+      const cards = (data.roles || []).map(r => {
+        const tier = r.match >= 70 ? 'high' : r.match >= 45 ? 'medium' : 'low';
+        return `<div class="fit-card ${tier}">
+          <div>
+            <div class="role">${r.title}</div>
+            <div class="notes">${r.notes}</div>
+          </div>
+          <div class="match">${r.match}%</div>
+        </div>`;
+      }).join('');
+      el.innerHTML = `<div class="result-section"><h3>Your best role matches</h3></div>${cards}`;
+      el.classList.add('show');
+    }
+  </script>
+</body>
+</html>
