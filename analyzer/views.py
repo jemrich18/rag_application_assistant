@@ -6,10 +6,12 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from openai import OpenAI
 from dotenv import load_dotenv
+import chromadb
 
 load_dotenv()
 
 client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+
 
 def index(request):
     return render(request, 'analyzer/index.html')
@@ -23,13 +25,30 @@ def extract_text_from_pdf(pdf_file):
     return text
 
 
-def analyze_with_ai(resume_text, job_description):
+def get_embedding(text):
+    response = client.embeddings.create(
+        input=text,
+        model="text-embedding-ada-002"
+    )
+    return response.data[0].embedding
+
+
+def analyze_with_ai(collection, job_description):
+    # Embed the job description and retrieve relevant resume chunks
+    job_embedding = get_embedding(job_description)
+    results = collection.query(
+        query_embeddings=[job_embedding],
+        n_results=3
+    )
+    retrieved_chunks = results['documents'][0]
+    context = " ".join(retrieved_chunks)
+
     prompt = f"""You are an expert resume analyst and career coach.
 
 Analyze this resume against the job description and return ONLY a JSON object with no markdown, no backticks, no extra text.
 
 Resume:
-{resume_text}
+{context}
 
 Job Description:
 {job_description}
@@ -47,7 +66,7 @@ Return exactly this JSON structure:
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )
-    
+
     raw = response.choices[0].message.content.strip()
     raw = raw.replace('```json', '').replace('```', '').strip()
     return json.loads(raw)
@@ -101,7 +120,7 @@ Be honest and accurate. Base scores purely on what is in the resume."""
 def analyze(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
-    
+
     job_description = request.POST.get('job_description', '').strip()
     resume_file = request.FILES.get('resume')
 
@@ -109,9 +128,35 @@ def analyze(request):
         return JsonResponse({'error': 'Both resume and job description are required'}, status=400)
 
     try:
+        # Extract text from resume PDF
         resume_text = extract_text_from_pdf(resume_file)
-        result = analyze_with_ai(resume_text, job_description)
+
+        # Chunk the resume
+        chunks = resume_text.split(". ")
+        chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+
+        # Initialize ChromaDB and store chunks
+        chroma_client = chromadb.Client()
+        collection = chroma_client.get_or_create_collection(name="resume_chunks")
+
+        # Embed and store each chunk
+        embeddings = []
+        for chunk in chunks:
+            vector = get_embedding(chunk)
+            embeddings.append(vector)
+
+        ids = [f"chunk_{i}" for i in range(len(chunks))]
+
+        collection.add(
+            documents=chunks,
+            embeddings=embeddings,
+            ids=ids
+        )
+
+        # Analyze using RAG retrieval
+        result = analyze_with_ai(collection, job_description)
         return JsonResponse(result)
+
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -130,5 +175,6 @@ def career_fit(request):
         resume_text = extract_text_from_pdf(resume_file)
         result = career_fit_with_ai(resume_text)
         return JsonResponse(result)
+
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
