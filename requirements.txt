@@ -31,6 +31,7 @@ huggingface-hub==1.10.1
 idna==3.11
 importlib-metadata==8.7.1
 importlib-resources==6.5.2
+iniconfig==2.3.0
 jiter==0.13.0
 jsonpatch==1.33
 jsonpointer==3.1.1
@@ -66,6 +67,7 @@ packaging==26.0
 pdfminer-six==20251230
 pdfplumber==0.11.9
 pillow==12.2.0
+pluggy==1.6.0
 protobuf==6.33.6
 pybase64==1.4.3
 pycparser==3.0
@@ -76,6 +78,8 @@ pygments==2.20.0
 pypdfium2==5.7.0
 pypika==0.51.1
 pyproject-hooks==1.2.0
+pytest==9.0.3
+pytest-django==4.12.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 pyyaml==6.0.3
