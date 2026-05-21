@@ -141,6 +141,13 @@ def create_checkout_session(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
     try:
+        # Force session to be created and saved before checkout
+        if not request.session.session_key:
+            request.session.create()
+        
+        session_key = request.session.session_key
+        logger.debug(f"Creating checkout with session key: {session_key}")
+
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -150,20 +157,13 @@ def create_checkout_session(request):
             mode='payment',
             success_url=request.build_absolute_uri('/payment-success/') + '?session_id={CHECKOUT_SESSION_ID}',
             cancel_url=request.build_absolute_uri('/payment-cancel/'),
-            metadata={'django_session_key': request.session.session_key}
+            metadata={'django_session_key': session_key}
         )
+        logger.debug(f"Checkout session created: {checkout_session.id}")
         return JsonResponse({'url': checkout_session.url})
     except Exception as e:
+        logger.debug(f"Checkout error: {e}")
         return JsonResponse({'error': str(e)}, status=500)
-
-
-def payment_success(request):
-    # Stripe redirects here after payment — credits added via webhook
-    return render(request, 'analyzer/payment_success.html')
-
-
-def payment_cancel(request):
-    return render(request, 'analyzer/payment_cancel.html')
 
 
 @csrf_exempt
@@ -192,7 +192,13 @@ def stripe_webhook(request):
 
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
-        metadata = session.get('metadata') or {}
+        
+        # Fix: convert Stripe object to dict first
+        try:
+            metadata = dict(session['metadata']) if session['metadata'] else {}
+        except (KeyError, TypeError):
+            metadata = {}
+        
         django_session_key = metadata.get('django_session_key')
 
         logger.debug(f"Metadata: {metadata}")
