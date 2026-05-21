@@ -169,29 +169,22 @@ def payment_cancel(request):
 def stripe_webhook(request):
     payload = request.body
     sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
-    
-    print(f"Webhook received. Sig header present: {bool(sig_header)}")
-    print(f"Webhook secret configured: {bool(settings.STRIPE_WEBHOOK_SECRET)}")
 
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
         )
-        print(f"Event type: {event['type']}")
-    except ValueError as e:
-        print(f"ValueError: {e}")
+    except ValueError:
         return JsonResponse({'error': 'Invalid payload'}, status=400)
-    except stripe.error.SignatureVerificationError as e:
-        print(f"Signature error: {e}")
+    except stripe.error.SignatureVerificationError:
         return JsonResponse({'error': 'Invalid signature'}, status=400)
-    except Exception as e:
-        print(f"Unexpected error constructing event: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
 
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         metadata = session.get('metadata') or {}
         django_session_key = metadata.get('django_session_key')
+
+        print(f"Metadata: {metadata}")
         print(f"Session key from metadata: {django_session_key}")
 
         if django_session_key:
@@ -200,12 +193,15 @@ def stripe_webhook(request):
                 s = SessionStore(session_key=django_session_key)
                 s.load()
                 current = s.get('analyses_remaining', 0)
+                print(f"Current credits before update: {current}")
                 s['analyses_remaining'] = current + CREDITS_PER_PACK
                 s.save()
-                print(f"Credits updated to {current + CREDITS_PER_PACK}")
+                print(f"Credits updated to: {s['analyses_remaining']}")
             except Exception as e:
                 print(f"Session update error: {e}")
                 return JsonResponse({'error': str(e)}, status=500)
+        else:
+            print("No django_session_key found in metadata!")
 
     return JsonResponse({'status': 'ok'})
 
