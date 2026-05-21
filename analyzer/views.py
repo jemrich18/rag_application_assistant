@@ -1,12 +1,9 @@
 import os
 import json
-import stripe
 import pdfplumber
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
-from django.conf import settings
 from openai import OpenAI
 from dotenv import load_dotenv
 import chromadb
@@ -14,24 +11,10 @@ import chromadb
 load_dotenv()
 
 client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
-stripe.api_key = settings.STRIPE_SECRET_KEY
-
-FREE_ANALYSES = 3
-CREDITS_PER_PACK = 10
 
 
 def index(request):
-    # Initialize session credits for new visitors
-    if 'analyses_remaining' not in request.session:
-        request.session['analyses_remaining'] = FREE_ANALYSES
-    return render(request, 'analyzer/index.html', {
-        'stripe_publishable_key': settings.STRIPE_PUBLISHABLE_KEY
-    })
-
-
-def get_credits(request):
-    remaining = request.session.get('analyses_remaining', FREE_ANALYSES)
-    return JsonResponse({'credits': remaining})
+    return render(request, 'analyzer/index.html')
 
 
 def extract_text_from_pdf(pdf_file):
@@ -51,6 +34,7 @@ def get_embedding(text):
 
 
 def analyze_with_ai(collection, job_description):
+    # Embed the job description and retrieve relevant resume chunks
     job_embedding = get_embedding(job_description)
     results = collection.query(
         query_embeddings=[job_embedding],
@@ -89,16 +73,12 @@ Return exactly this JSON structure:
 
 
 def career_fit_with_ai(resume_text):
-    prompt = f"""You are an expert career coach analyzing a resume.
+    prompt = f"""You are an expert career coach analyzing a developer's resume.
 
 Resume:
 {resume_text}
 
 Analyze this resume and return ONLY a JSON object with no markdown, no backticks, no extra text.
-
-First, identify the candidate's field and experience level based on the resume content.
-Then evaluate the 10 most relevant job roles for this specific person — do NOT assume they are in tech.
-Consider any industry: healthcare, education, trades, business, creative, legal, finance, etc.
 
 Return exactly this JSON structure:
 {{
@@ -111,7 +91,19 @@ Return exactly this JSON structure:
   ]
 }}
 
-Be honest and accurate. Base scores purely on what is in the resume. Return exactly 10 roles."""
+Evaluate these specific roles in this order:
+1. Junior Django Developer
+2. Junior Python Developer
+3. Junior Backend Developer
+4. Junior Full Stack Developer
+5. Junior Software Engineer
+6. Python/Django Freelancer
+7. Junior AI/ML Engineer
+8. Junior Data Analyst
+9. Junior DevOps Engineer
+10. Junior React Developer
+
+Be honest and accurate. Base scores purely on what is in the resume."""
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -124,95 +116,10 @@ Be honest and accurate. Base scores purely on what is in the resume. Return exac
     return json.loads(raw)
 
 
-def use_credit(request):
-    """Deduct one credit. Returns True if allowed, False if out of credits."""
-    remaining = request.session.get('analyses_remaining', FREE_ANALYSES)
-    if remaining <= 0:
-        return False
-    request.session['analyses_remaining'] = remaining - 1
-    request.session.modified = True
-    return True
-
-
-@csrf_exempt
-def create_checkout_session(request):
-    if request.method != 'POST':
-        return JsonResponse({'error': 'POST required'}, status=405)
-    try:
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=['card'],
-            line_items=[{
-                'price': settings.STRIPE_PRICE_ID,
-                'quantity': 1,
-            }],
-            mode='payment',
-            success_url=request.build_absolute_uri('/payment-success/') + '?session_id={CHECKOUT_SESSION_ID}',
-            cancel_url=request.build_absolute_uri('/payment-cancel/'),
-            metadata={'django_session_key': request.session.session_key}
-        )
-        return JsonResponse({'url': checkout_session.url})
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-def payment_success(request):
-    # Stripe redirects here after payment — credits added via webhook
-    return render(request, 'analyzer/payment_success.html')
-
-
-def payment_cancel(request):
-    return render(request, 'analyzer/payment_cancel.html')
-
-
-@csrf_exempt
-@require_POST
-def stripe_webhook(request):
-    payload = request.body
-    sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
-
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
-    except ValueError:
-        return JsonResponse({'error': 'Invalid payload'}, status=400)
-    except stripe.error.SignatureVerificationError:
-        return JsonResponse({'error': 'Invalid signature'}, status=400)
-
-    if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
-        metadata = session.get('metadata') or {}
-        django_session_key = metadata.get('django_session_key')
-
-        print(f"Metadata: {metadata}")
-        print(f"Session key from metadata: {django_session_key}")
-
-        if django_session_key:
-            try:
-                from django.contrib.sessions.backends.db import SessionStore
-                s = SessionStore(session_key=django_session_key)
-                s.load()
-                current = s.get('analyses_remaining', 0)
-                print(f"Current credits before update: {current}")
-                s['analyses_remaining'] = current + CREDITS_PER_PACK
-                s.save()
-                print(f"Credits updated to: {s['analyses_remaining']}")
-            except Exception as e:
-                print(f"Session update error: {e}")
-                return JsonResponse({'error': str(e)}, status=500)
-        else:
-            print("No django_session_key found in metadata!")
-
-    return JsonResponse({'status': 'ok'})
-
-
 @csrf_exempt
 def analyze(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
-
-    if not use_credit(request):
-        return JsonResponse({'error': 'no_credits'}, status=402)
 
     job_description = request.POST.get('job_description', '').strip()
     resume_file = request.FILES.get('resume')
@@ -221,26 +128,36 @@ def analyze(request):
         return JsonResponse({'error': 'Both resume and job description are required'}, status=400)
 
     try:
+        # Extract text from resume PDF
         resume_text = extract_text_from_pdf(resume_file)
+
+        # Chunk the resume
         chunks = resume_text.split(". ")
         chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
 
+        # Initialize ChromaDB and store chunks
         chroma_client = chromadb.Client()
         collection = chroma_client.get_or_create_collection(name="resume_chunks")
 
-        embeddings = [get_embedding(chunk) for chunk in chunks]
+        # Embed and store each chunk
+        embeddings = []
+        for chunk in chunks:
+            vector = get_embedding(chunk)
+            embeddings.append(vector)
+
         ids = [f"chunk_{i}" for i in range(len(chunks))]
 
-        collection.add(documents=chunks, embeddings=embeddings, ids=ids)
+        collection.add(
+            documents=chunks,
+            embeddings=embeddings,
+            ids=ids
+        )
 
+        # Analyze using RAG retrieval
         result = analyze_with_ai(collection, job_description)
-        result['credits_remaining'] = request.session.get('analyses_remaining', 0)
         return JsonResponse(result)
 
     except Exception as e:
-        # Refund the credit if something went wrong
-        request.session['analyses_remaining'] = request.session.get('analyses_remaining', 0) + 1
-        request.session.modified = True
         return JsonResponse({'error': str(e)}, status=500)
 
 
@@ -248,9 +165,6 @@ def analyze(request):
 def career_fit(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
-
-    if not use_credit(request):
-        return JsonResponse({'error': 'no_credits'}, status=402)
 
     resume_file = request.FILES.get('resume')
 
@@ -260,10 +174,7 @@ def career_fit(request):
     try:
         resume_text = extract_text_from_pdf(resume_file)
         result = career_fit_with_ai(resume_text)
-        result['credits_remaining'] = request.session.get('analyses_remaining', 0)
         return JsonResponse(result)
 
     except Exception as e:
-        request.session['analyses_remaining'] = request.session.get('analyses_remaining', 0) + 1
-        request.session.modified = True
         return JsonResponse({'error': str(e)}, status=500)
