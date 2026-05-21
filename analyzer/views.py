@@ -73,12 +73,16 @@ Return exactly this JSON structure:
 
 
 def career_fit_with_ai(resume_text):
-    prompt = f"""You are an expert career coach analyzing a developer's resume.
+    prompt = f"""You are an expert career coach analyzing a resume.
 
 Resume:
 {resume_text}
 
 Analyze this resume and return ONLY a JSON object with no markdown, no backticks, no extra text.
+
+First, identify the candidate's field and experience level based on the resume content.
+Then evaluate the 10 most relevant job roles for this specific person — do NOT assume they are in tech.
+Consider any industry: healthcare, education, trades, business, creative, legal, finance, etc.
 
 Return exactly this JSON structure:
 {{
@@ -91,19 +95,7 @@ Return exactly this JSON structure:
   ]
 }}
 
-Evaluate these specific roles in this order:
-1. Junior Django Developer
-2. Junior Python Developer
-3. Junior Backend Developer
-4. Junior Full Stack Developer
-5. Junior Software Engineer
-6. Python/Django Freelancer
-7. Junior AI/ML Engineer
-8. Junior Data Analyst
-9. Junior DevOps Engineer
-10. Junior React Developer
-
-Be honest and accurate. Base scores purely on what is in the resume."""
+Be honest and accurate. Base scores purely on what is in the resume. Return exactly 10 roles."""
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
