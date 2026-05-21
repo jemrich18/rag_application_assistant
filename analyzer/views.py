@@ -174,19 +174,29 @@ def stripe_webhook(request):
         event = stripe.Webhook.construct_event(
             payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
         )
-    except (ValueError, stripe.error.SignatureVerificationError):
+    except ValueError:
+        return JsonResponse({'error': 'Invalid payload'}, status=400)
+    except stripe.error.SignatureVerificationError:
         return JsonResponse({'error': 'Invalid signature'}, status=400)
 
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
-        django_session_key = session.get('metadata', {}).get('django_session_key')
+        
+        # Handle both old and new Stripe API structures
+        metadata = session.get('metadata') or {}
+        django_session_key = metadata.get('django_session_key')
 
         if django_session_key:
-            from django.contrib.sessions.backends.db import SessionStore
-            s = SessionStore(session_key=django_session_key)
-            current = s.get('analyses_remaining', 0)
-            s['analyses_remaining'] = current + CREDITS_PER_PACK
-            s.save()
+            try:
+                from django.contrib.sessions.backends.db import SessionStore
+                s = SessionStore(session_key=django_session_key)
+                s.load()
+                current = s.get('analyses_remaining', 0)
+                s['analyses_remaining'] = current + CREDITS_PER_PACK
+                s.save()
+            except Exception as e:
+                print(f"Session update error: {e}")
+                return JsonResponse({'error': str(e)}, status=500)
 
     return JsonResponse({'status': 'ok'})
 
