@@ -10,8 +10,10 @@ from django.conf import settings
 from openai import OpenAI
 from dotenv import load_dotenv
 import chromadb
+import logging
 
 load_dotenv()
+logger = logging.getLogger('analyzer')
 
 client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -169,23 +171,32 @@ def payment_cancel(request):
 def stripe_webhook(request):
     payload = request.body
     sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
+    
+    logger.debug(f"Webhook hit. Sig header: {bool(sig_header)}")
+    logger.debug(f"Webhook secret set: {bool(settings.STRIPE_WEBHOOK_SECRET)}")
+    logger.debug(f"Raw payload preview: {payload[:200]}")
 
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
         )
-    except ValueError:
+    except ValueError as e:
+        logger.debug(f"ValueError: {e}")
         return JsonResponse({'error': 'Invalid payload'}, status=400)
-    except stripe.error.SignatureVerificationError:
+    except stripe.error.SignatureVerificationError as e:
+        logger.debug(f"Sig error: {e}")
         return JsonResponse({'error': 'Invalid signature'}, status=400)
+
+    logger.debug(f"Event type: {event['type']}")
+    logger.debug(f"Full event data: {event['data']['object']}")
 
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         metadata = session.get('metadata') or {}
         django_session_key = metadata.get('django_session_key')
 
-        print(f"Metadata: {metadata}")
-        print(f"Session key from metadata: {django_session_key}")
+        logger.debug(f"Metadata: {metadata}")
+        logger.debug(f"Session key: {django_session_key}")
 
         if django_session_key:
             try:
@@ -193,15 +204,14 @@ def stripe_webhook(request):
                 s = SessionStore(session_key=django_session_key)
                 s.load()
                 current = s.get('analyses_remaining', 0)
-                print(f"Current credits before update: {current}")
                 s['analyses_remaining'] = current + CREDITS_PER_PACK
                 s.save()
-                print(f"Credits updated to: {s['analyses_remaining']}")
+                logger.debug(f"Credits updated to {s['analyses_remaining']}")
             except Exception as e:
-                print(f"Session update error: {e}")
+                logger.debug(f"Session error: {e}")
                 return JsonResponse({'error': str(e)}, status=500)
         else:
-            print("No django_session_key found in metadata!")
+            logger.debug("No session key in metadata!")
 
     return JsonResponse({'status': 'ok'})
 
