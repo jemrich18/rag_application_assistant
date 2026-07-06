@@ -58,6 +58,18 @@
     .fit-card.medium .match { color: #c8a96e; }
     .fit-card.low .match { color: #888; }
     .fit-card .notes { font-size: 13px; color: #666; margin-top: 4px; }
+    .job-card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+    .job-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+    .job-card .title { font-size: 15px; font-weight: 500; color: #fff; }
+    .job-card .meta { font-size: 13px; color: #888; margin-top: 2px; }
+    .job-card .score { font-size: 1.3rem; font-weight: 500; white-space: nowrap; }
+    .job-card.high .score { color: #27ae60; }
+    .job-card.medium .score { color: #c8a96e; }
+    .job-card.low .score { color: #888; }
+    .job-card .reason { font-size: 13px; color: #ccc; margin-top: 10px; line-height: 1.6; }
+    .job-card .apply-link { display: inline-block; margin-top: 14px; padding: 8px 18px; background: #c8a96e; color: #0f0f0f; border-radius: 6px; font-size: 13px; font-weight: 500; text-decoration: none; }
+    .job-card .apply-link:hover { background: #d4b87a; }
+    .job-card .source-tag { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 8px; }
 
     /* Modal */
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; align-items: center; justify-content: center; }
@@ -96,6 +108,7 @@
   <div class="tabs">
     <button class="tab active" onclick="switchTab('match')">Job Match Analyzer</button>
     <button class="tab" onclick="switchTab('fit')">Career Fit Finder</button>
+    <button class="tab" onclick="switchTab('apply')">Find &amp; Apply</button>
   </div>
 
   <div class="container">
@@ -136,6 +149,31 @@
         <p>Analyzing your resume to find your best career matches...</p>
       </div>
       <div class="results" id="results-fit"></div>
+    </div>
+
+    <!-- TAB 3: Find & Apply -->
+    <div class="panel" id="panel-apply">
+      <div class="form-group">
+        <label>Job title or keyword (optional)</label>
+        <textarea id="apply-keyword" rows="1" placeholder="e.g. Frontend Developer"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Location (optional — try "Remote")</label>
+        <textarea id="apply-location" rows="1" placeholder="e.g. Remote"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Upload your resume (PDF)</label>
+        <div class="file-drop" id="drop-apply" onclick="document.getElementById('resume-apply').click()">
+          <input type="file" id="resume-apply" accept=".pdf" onchange="handleFile(this, 'drop-apply', 'apply-filename')">
+          <p id="apply-filename">Click to upload your resume PDF</p>
+        </div>
+      </div>
+      <button class="btn" id="btn-apply" onclick="runFindJobs()">Find Matching Jobs</button>
+      <div class="loading" id="loading-apply">
+        <div class="spinner"></div>
+        <p>Scanning job boards and matching against your resume...</p>
+      </div>
+      <div class="results" id="results-apply"></div>
     </div>
 
   </div>
@@ -266,6 +304,62 @@
           <h3>Cover letter</h3>
           <p>${data.cover_letter || 'No cover letter generated.'}</p>
         </div>`;
+      el.classList.add('show');
+    }
+
+    async function runFindJobs() {
+      const resume = document.getElementById('resume-apply').files[0];
+      if (!resume) { alert('Please upload your resume PDF.'); return; }
+      const btn = document.getElementById('btn-apply');
+      btn.disabled = true;
+      document.getElementById('loading-apply').classList.add('show');
+      document.getElementById('results-apply').classList.remove('show');
+      const formData = new FormData();
+      formData.append('resume', resume);
+      formData.append('keyword', document.getElementById('apply-keyword').value.trim());
+      formData.append('location', document.getElementById('apply-location').value.trim());
+      try {
+        const res = await fetch('/find-jobs/', { method: 'POST', body: formData });
+        if (res.status === 402) { showPaywall(); btn.disabled = false; document.getElementById('loading-apply').classList.remove('show'); return; }
+        const data = await res.json();
+        if (data.credits_remaining !== undefined) updateCreditBadge(data.credits_remaining);
+        renderApplyResults(data);
+      } catch(e) {
+        alert('Something went wrong. Please try again.');
+      }
+      btn.disabled = false;
+      document.getElementById('loading-apply').classList.remove('show');
+    }
+
+    function renderApplyResults(data) {
+      const el = document.getElementById('results-apply');
+      if (data.error) {
+        el.innerHTML = `<div class="result-section"><p>${data.error}</p></div>`;
+        el.classList.add('show');
+        return;
+      }
+      const jobs = data.jobs || [];
+      if (!jobs.length) {
+        el.innerHTML = `<div class="result-section"><p>No matching jobs found. Try a broader keyword or location.</p></div>`;
+        el.classList.add('show');
+        return;
+      }
+      const cards = jobs.map(j => {
+        const tier = j.score >= 70 ? 'high' : j.score >= 45 ? 'medium' : 'low';
+        return `<div class="job-card ${tier}">
+          <div class="job-card-top">
+            <div>
+              <div class="title">${j.title}</div>
+              <div class="meta">${j.company}${j.location ? ' · ' + j.location : ''}</div>
+            </div>
+            <div class="score">${j.score}%</div>
+          </div>
+          <div class="reason">${j.reason || ''}</div>
+          <div class="source-tag">via ${j.source}</div>
+          <a class="apply-link" href="${j.url}" target="_blank" rel="noopener noreferrer">Apply →</a>
+        </div>`;
+      }).join('');
+      el.innerHTML = `<div class="result-section"><h3>Matching jobs</h3></div>${cards}`;
       el.classList.add('show');
     }
 
